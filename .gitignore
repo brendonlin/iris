@@ -1,0 +1,6 @@
+.ipynb*
+.vscode
+.DS_Store
+data
+docs
+hint.py
