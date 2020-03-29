@@ -37,7 +37,7 @@ class HeartDiseaseDoctor(object):
         self.featureNames = []
         self.Xdata = None
 
-    def readXData(self, Xdata):
+    def readXdata(self, Xdata):
         Xdata_ = Xdata.copy()
         Xdata_.rename(self.featureMap, axis=1, inplace=True)
         Xdata_.replace(
@@ -70,6 +70,11 @@ class HeartDiseaseDoctor(object):
     def readydata(self, ydata):
         y = ydata.values.flatten()
         return y
+
+    def readData(self, Xdata, ydata):
+        X = self.readXdata(Xdata)
+        y = self.readydata(ydata)
+        return (X, y)
 
     def _getIndex(self, target, inverse=False):
         if inverse:
@@ -125,17 +130,20 @@ class HeartDiseaseDoctor(object):
         return df
 
     def modeling(self, Xdata, ydata):
-        X = self.readXData(Xdata)
-        y = self.readydata(ydata)
+        print(f"\nStart Modeling")
+        X, y = self.readData(Xdata, ydata)
         pipe = self.getPipe()
         pipe.fit(X, y)
         self.fittedPipe = pipe
         joblib.dump(pipe, self.savePath)
+        print(f"Model saved at {self.savePath}")
+        return pipe
 
-    def apply(self, Xdata):
+    def predict(self, Xdata):
         X = self.readXdata(Xdata)
         try:
             pipe = joblib.load(self.savePath)
+            print(f"Model read from {self.savePath}")
         except Exception as e:
             print(e)
         else:
