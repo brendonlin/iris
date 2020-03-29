@@ -1,62 +1,77 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# import pandas as pd
-# import numpy as np
-# from matplotlib import pyplot as plt
-
-# from sklearn import tree
 import pandas as pd
 import numpy as np
-from sklearn import linear_model
 
 # from sklearn import naive_bayes
 # from sklearn import model_selection
 from sklearn import pipeline
 from sklearn import preprocessing
+from sklearn import ensemble
 from sklearn import compose
 
-# from sklearn import metrics
+import joblib
 
 
-# import altair as alt
-
-
-# class HDTranformer(preprocessing.)
 class HeartDiseaseDoctor(object):
+    featureMap = {
+        "age": "age",
+        "sex": "sex",
+        "cp": "chest_pain_type",
+        "trestbps": "blood_pressure",
+        "chol": "cholestoral",
+        "fbs": "blood_sugar",
+        "restecg": "rest_ecg",
+        "thalach": "max_heart_rate",
+        "exang": "exercise_induced_angina",
+        "oldpeak": "st_depression",
+        "slope": "st_slope",
+        "ca": "vessels_number",
+        "thal": "thalassemia",
+    }
+    className = "target"
+    savePath = "data/heart.joblib"
+
     def __init__(self):
-        self.featureNames = [
-            "age",
-            "sex",
-            "cp",
-            "trestbps",
-            "chol",
-            "fbs",
-            "restecg",
-            "thalach",
-            "exang",
-            "oldpeak",
-            "slope",
-            "ca",
-            "thal",
-        ]
+        self.featureNames = []
+        self.Xdata = None
 
-        self.className = "target"
-        self.transformedFeatureNames = []
+    def readXData(self, Xdata):
+        Xdata_ = Xdata.copy()
+        Xdata_.rename(self.featureMap, axis=1, inplace=True)
+        Xdata_.replace(
+            {
+                "sex": {0: "female", 1: "male"},
+                "chest_pain_type": {
+                    0: "typical angina",
+                    1: "atypical angina",
+                    2: "non-anginal pain",
+                    3: "asymptomatic",
+                },
+                "blood_sugar": {0: "lower than 120mg/ml", 1: "greater than 120mg/ml"},
+                "rest_ecg": {
+                    1: "normal",
+                    2: "ST-T wave abnormality",
+                    3: "left ventricular hypertrophy",
+                },
+                "exercise_induced_angina": {0: "no", 1: "yes"},
+                "st_slope": {0: "upsloping", 1: "flat", 2: "downsloping"},
+                "thalassemia": {1: "normal", 2: "fixed defect", 3: "reversable defect"},
+            },
+            inplace=True,
+        )
+        Xdata_ = pd.get_dummies(Xdata_, drop_first=True)
+        self.Xdata = Xdata_
+        self.featureNames = list(Xdata_.columns)
+        X = Xdata_.values
+        return X
 
-    def readData(self, df):
-        Xdata = df[self.featureNames]
-        ydata = df[self.className]
-        # Xdata["thalach_lager_140"] = (Xdata["thalach"] > 140) * 1
-        # self.featureNames += ["thalach_lager_140"]
-        # Xdata["oldpeak_small"] = (Xdata["oldpeak"] <= 0.5) * 1
-        # self.featureNames += ["oldpeak_small"]
-        X = Xdata.values
+    def readydata(self, ydata):
         y = ydata.values.flatten()
-        return X, y
+        return y
 
-    def getIndex(self, target, inverse=False):
-        print(self.featureNames)
+    def _getIndex(self, target, inverse=False):
         if inverse:
             return [
                 self.featureNames.index(x) for x in self.featureNames if x not in target
@@ -65,41 +80,39 @@ class HeartDiseaseDoctor(object):
             return [self.featureNames.index(x) for x in target]
 
     def getTransformer(self, **params):
-        numvars = ["trestbps", "chol", "thalach", "age"]
-        cateVars = ["cp", "thal"]
+        # numvars = ["blood_pressure", "cholestoral", "max_heart_rate", "age"]
+        # cateVars = ["cp", "thal"]
         ct = compose.ColumnTransformer(
             [
-                ("norm", preprocessing.StandardScaler(), self.getIndex(numvars)),
-                (
-                    "cate",
-                    preprocessing.OneHotEncoder(handle_unknown="ignore"),
-                    self.getIndex(cateVars),
-                ),
+                # ("norm", preprocessing.StandardScaler(), self._getIndex(numvars)),
+                # (
+                #     "cate",
+                #     preprocessing.OneHotEncoder(handle_unknown="ignore"),
+                #     self.getIndex(cateVars),
+                # ),
             ],
             remainder="passthrough",
         )
-        pipe = pipeline.Pipeline([("norm", ct)])
-        pipe.set_params(**params)
-        return pipe
+        transformer = pipeline.Pipeline([("norm", ct)])
+        transformer.set_params(**params)
+        return transformer
 
     def getModel(self, **params):
-        model = linear_model.LogisticRegression(
-            max_iter=3000, penalty="l1", solver="liblinear"
-        )
+        model = ensemble.RandomForestClassifier(max_depth=5)
         model.set_params(**params)
         return model
 
-    def getFullPipe(self, **params):
+    def getPipe(self, **params):
         transformer = self.getTransformer()
         model = self.getModel()
-        fullPipe = pipeline.Pipeline([("tranformer", transformer), ("model", model)])
-        fullPipe.set_params(**params)
-        return fullPipe
+        pipe = pipeline.Pipeline([("tranformer", transformer), ("model", model)])
+        pipe.set_params(**params)
+        return pipe
 
-    def getPredictDetail(self, X, y, yPredict, transformedFeatureNames):
+    def getPredictDetail(self, X, y, yPredict, featureNames):
         yPrecitColumnName = f"{self.className}_predict"
         values = np.hstack([X, np.vstack([y, yPredict]).T])
-        columns = transformedFeatureNames + [
+        columns = featureNames + [
             self.className,
             yPrecitColumnName,
         ]
@@ -111,62 +124,20 @@ class HeartDiseaseDoctor(object):
         )
         return df
 
+    def modeling(self, Xdata, ydata):
+        X = self.readXData(Xdata)
+        y = self.readydata(ydata)
+        pipe = self.getPipe()
+        pipe.fit(X, y)
+        self.fittedPipe = pipe
+        joblib.dump(pipe, self.savePath)
 
-# def main():
-#     df = getData()
-
-#     rx, tx, ry, ty = model_selection.train_test_split(X, y, test_size=0.2)
-
-#     pipe.fit(rx, ry)
-#     print(metrics.classification_report(pipe.predict(tx), ty))
-
-
-# gscv = model_selection.GridSearchCV(pipe, paramGrid, cv=5, scoring="f1")
-# gscv.fit(rx, ry)
-
-# for key in ["mean_test_score", "std_test_score", "rank_test_score"]:
-#     print(f"{key}:{[round(x,2) for x in gscv.cv_results_[key]]}")
-# print(gscv.best_params_)
-
-
-# # pipe.set_params(norm=preprocessing.StandardScaler())
-# scores = model_selection.cross_val_score(pipe, rx, ry, cv=5, scoring="f1")
-# scoreMean, scoreStd = scores.mean(), scores.std()
-# print(f"Baseline Score:{scoreMean:.2f} +/-{scoreStd*1:.2f}")
-
-# getFindex(["cp", "thal"], inverse=True)
-
-
-# newRx = ct.fit_transform(rx)
-# corr = [np.corrcoef(newRx[:, col], ry)[0, 1] for col in range(newRx.shape[1])]
-# # ct.categories_
-# # ct.get_feature_names()
-# newFeatureNames = [x for x in featureNames if x not in ["cp", "thal"]] + list(
-#     ct.named_transformers_["cate"].get_feature_names(["cp", "thal"])
-# )
-# len(corr)
-# len(newFeatureNames)
-
-
-# statdf = pd.DataFrame({"corr": corr, "feature": newFeatureNames})
-# statdf
-
-# alt.Chart(statdf).mark_bar().encode(
-#     alt.Y("feature:O", sort=None), alt.X("corr:Q"), tooltip="corr:Q"
-# )
-
-
-# # plt.figure(figsize=(20,5))
-# axes = pd.DataFrame(newRx, columns=newFeatureNames).hist(figsize=(20, 10))
-# plt.tight_layout()
-
-
-# groupMean = (
-#     pd.DataFrame(newRx, columns=newFeatureNames)
-#     .groupby(ry)
-#     .mean()
-#     .stack()
-#     .reset_index()
-# )
-# groupMean.columns = ["target", "feature", "value"]
-# alt.Chart(groupMean).mark_bar().encode(x="target:O", y="value",).facet(column="feature")
+    def apply(self, Xdata):
+        X = self.readXdata(Xdata)
+        try:
+            pipe = joblib.load(self.savePath)
+        except Exception as e:
+            print(e)
+        else:
+            result = pipe.predict(X)
+            return result
