@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn import compose
 from sklearn import tree
-from sklearn import pipeline
 from sklearn import ensemble
+from sklearn import naive_bayes
+from sklearn import pipeline
 from sklearn import preprocessing
-
+from sklearn import decomposition
 from .common import ordinalClassifier
 
 # from sklearn import preprocessing
@@ -71,13 +72,7 @@ class strategyGameDoctor(object):
         # xd.reset_index(inplace=True)
         xd.rename(self.featureMap, axis=1, inplace=True)
         xd.drop(
-            [
-                "url",
-                "id",
-                "primary_genre",
-                "developer",
-                # "user_rating_count"
-            ],
+            ["url", "id", "primary_genre", "developer", "user_rating_count"],
             axis=1,
             inplace=True,
         )
@@ -85,13 +80,15 @@ class strategyGameDoctor(object):
         xd = xd.assign(
             is_with_subtitle=pd.isnull(xd["subtitle"]),
             price_zone=pd.cut(
-                xd["price"],
-                [0, 0.01, 4.99, 9.99, 19.99, 59.99, float("inf")],
-                include_lowest=True,
+                xd["price"], [0, 0.01, 4.99, 9.99, float("inf")], include_lowest=True,
             ),
+            is_free=xd["price"] <= 0.01,
             is_iap=~pd.isnull(xd["in_app_purchases"]),
             log_size=(xd["size"] / 1024 / 1024).apply(lambda x: np.log(x)),
             cur_release_duration=datediff(xd["cur_version_dt"], xd["original_dt"]),
+            title_end_with_number=xd["name"].apply(
+                lambda x: re.match(r".+\s\d+", x) is not None
+            ),
         )
 
         xd = xd.join(processIAP(xd["in_app_purchases"]))
@@ -126,8 +123,9 @@ class strategyGameDoctor(object):
 
     def getTransformer(self, **params):
 
-        ct = compose.ColumnTransformer([], remainder="passthrough",)
-        transformer = pipeline.Pipeline([("norm", ct)])
+        # ct = compose.ColumnTransformer([], remainder="passthrough",)
+        # transformer = pipeline.Pipeline([("pac", decomposition.PCA())])
+        transformer = pipeline.Pipeline([("norm", "passthrough")])
         transformer.set_params(**params)
         return transformer
 
@@ -135,10 +133,11 @@ class strategyGameDoctor(object):
         # model = ordinalClassifier.OrdinalClassifier(
         #     ensemble.RandomForestClassifier(max_depth=5)
         # )
-        model = ordinalClassifier.OrdinalClassifier(
-            tree.DecisionTreeClassifier(max_depth=5)
-        )
-        # model = tree.DecisionTreeClassifier(max_depth=5)
+        # model = ordinalClassifier.OrdinalClassifier(
+        #     tree.DecisionTreeClassifier(max_depth=5)
+        # )
+        model = ensemble.RandomForestClassifier(max_depth=10)
+        # model = naive_bayes.GaussianNB()
         # model.set_params(**params)
         return model
 
@@ -184,16 +183,17 @@ def processIAP(iapdata):
 
 
 def processLanguages(landata):
-    columns = ["nlan", "only_en", "with_zh", "with_ja", "multi_lan"]
+    columns = ["nlan", "only_en", "with_zh", "with_ja", "with_de", "multi_lan"]
     records = []
     for value in landata.values:
         languages = str(value).split(", ")
         nlan = len(languages)
         with_zh = "ZH" in languages
         with_ja = "JA" in languages
+        with_de = "DE" in languages
         only_en = nlan == 1 and "EN" in languages
         multi_lan = nlan > 3
-        record = (nlan, only_en, with_zh, with_ja, multi_lan)
+        record = (nlan, only_en, with_zh, with_ja, with_de, multi_lan)
         records.append(record)
     df = pd.DataFrame(records, columns=columns)
     return df
@@ -202,8 +202,13 @@ def processLanguages(landata):
 def processGenres(genredata):
     k = genredata.str.split(", ", expand=True).stack().reset_index()
     k.columns = ["index", "rn", "genre"]
+
+    smallGenre = (k.groupby("genre")["genre"].count() / len(set(k["index"]))) < 0.05
+    k = k.join(smallGenre, on="genre", rsuffix="_small")
+    k.loc[k["genre_small"], "genre"] = "ohter"
     df = pd.crosstab(k["index"], k["genre"])
-    df.drop(["Games", "Strategy"], axis=1, inplace=True)
+    df = (df > 0) * 1
+    df.drop(["Games", "Strategy", "Entertainment"], axis=1, inplace=True)
     df.columns = [f"genre_{x}" for x in df.columns]
     # df.reset_index(inplace=True)
     return df
@@ -211,8 +216,10 @@ def processGenres(genredata):
 
 def processDate(datedata, prefix=""):
     dt = pd.to_datetime(datedata)
-    df = pd.concat([2020 - dt.dt.year, dt.dt.month, dt.dt.day], axis=1)
-    df.columns = [f"{prefix}_{x}" for x in ["year", "month", "day"]]
+    currenDt = pd.to_datetime("2020-01-01")
+
+    df = pd.concat([(currenDt - dt).dt.days // 31], axis=1,)
+    df.columns = [f"{prefix}_{x}" for x in ["month_after"]]
     return df
 
 
